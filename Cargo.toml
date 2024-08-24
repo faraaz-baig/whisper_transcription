@@ -1,0 +1,10 @@
+[package]
+name = "whisper_transcription"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = "0.7"
+tokio = { version = "1", features = ["full"] }
+pyo3 = { version = "0.20", features = ["auto-initialize"] }
+serde = { version = "1.0", features = ["derive"] }

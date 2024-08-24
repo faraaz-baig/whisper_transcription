@@ -1,0 +1,5 @@
+/target
+/.venv
+/python/__pycache__
+base.txt
+README.md
