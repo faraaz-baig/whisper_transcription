@@ -4,9 +4,26 @@ use axum::{
     Json, Router,
 };
 use pyo3::prelude::*;
-use pyo3::types::PyBytes;
+use pyo3::types::{PyTuple, PyList, PyBytes};
+use tokio::time::{timeout, Duration, Instant};
 use serde::{Deserialize, Serialize};
 use std::{env, path::PathBuf, sync::Arc};
+
+#[derive(Serialize)]
+struct Segment {
+    start: f32,
+    end: f32,
+    text: String,
+}
+
+
+#[derive(Serialize)]
+struct TranscriptionResponse {
+    transcription: String,
+    language: String,
+    confidence: f32,
+    segments: Vec<Segment>,
+}
 
 struct AppState {
     whisper_module: Arc<PyObject>,
@@ -15,13 +32,6 @@ struct AppState {
 #[derive(Deserialize)]
 struct TranscriptionRequest {
     audio_data: Vec<u8>,
-}
-
-#[derive(Serialize)]
-struct TranscriptionResponse {
-    transcription: String,
-    language: String,
-    confidence: f32,
 }
 
 fn print_debug_info(py: Python) {
@@ -115,21 +125,67 @@ async fn transcribe(
     Json(payload): Json<TranscriptionRequest>,
 ) -> Json<TranscriptionResponse> {
     println!("Received audio data of length: {}", payload.audio_data.len());
-    let result = Python::with_gil(|py| -> PyResult<(String, String, f32)> {
-        let whisper_module = state.whisper_module.as_ref();
-        let audio_data = PyBytes::new(py, &payload.audio_data);
-        whisper_module
-            .getattr(py, "transcribe_audio")?
-            .call1(py, (audio_data,))?
-            .extract(py)
-    }).unwrap_or_else(|e| {
-        eprintln!("Error during transcription: {}", e);
-        ("Transcription failed".to_string(), "unknown".to_string(), 0.0)
-    });
+    let start_time = Instant::now();
+
+    let result = timeout(Duration::from_secs(300), async {
+        Python::with_gil(|py| -> PyResult<(String, String, f32, Vec<Segment>)> {
+            let whisper_module = state.whisper_module.as_ref();
+            let audio_data = PyBytes::new(py, &payload.audio_data);
+            println!("Calling transcribe_audio function...");
+            let result = whisper_module
+                .getattr(py,"transcribe_audio")?
+                .call1(py,(audio_data,))?;
+            
+            println!("Transcribe_audio function call completed");
+            let tuple: &PyTuple = result.downcast(py)?;
+            let transcription: String = tuple.get_item(0)?.extract()?;
+            let language: String = tuple.get_item(1)?.extract()?;
+            let confidence: f32 = tuple.get_item(2)?.extract()?;
+            let segments_py: &PyList = tuple.get_item(3)?.downcast()?;
+            
+            let segments: Vec<Segment> = segments_py
+                .iter()
+                .map(|seg| -> PyResult<Segment> {
+                    Ok(Segment {
+                        start: seg.getattr("start")?.extract()?,
+                        end: seg.getattr("end")?.extract()?,
+                        text: seg.getattr("text")?.extract()?,
+                    })
+                })
+                .collect::<PyResult<Vec<Segment>>>()?;
+
+            Ok((transcription, language, confidence, segments))
+        })
+    }).await;
+
+    let result = match result {
+        Ok(r) => r.unwrap_or_else(|e| {
+            eprintln!("Error during transcription: {}", e);
+            (
+                "Transcription failed".to_string(),
+                "unknown".to_string(),
+                0.0,
+                vec![],
+            )
+        }),
+        Err(_) => {
+            eprintln!("Transcription timed out after 300 seconds");
+            (
+                "Transcription timed out".to_string(),
+                "unknown".to_string(),
+                0.0,
+                vec![],
+            )
+        }
+    };
+
+    let elapsed = start_time.elapsed();
+    println!("Transcription completed in {:?}", elapsed);
 
     Json(TranscriptionResponse {
         transcription: result.0,
         language: result.1,
         confidence: result.2,
+        segments: result.3,
     })
 }

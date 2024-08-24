@@ -10,7 +10,7 @@ def send_request(audio_data):
     end_time = time.time()
     return end_time - start_time, response.json()
 
-def run_benchmark(audio_file_path, num_requests=10, concurrent=False):
+def run_benchmark(audio_file_path, num_requests=3, concurrent=False):
     with open(audio_file_path, 'rb') as audio_file:
         audio_data = audio_file.read()
 
