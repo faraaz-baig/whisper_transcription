@@ -10,7 +10,7 @@ except ImportError:
     sys.exit(1)
 
 class WhisperTranscriber:
-    def __init__(self, model_size="large-v3", device="cuda", compute_type="float16"):
+    def __init__(self, model_size="large-v3", device="cpu", compute_type="int8"):
         try:
             self.model = WhisperModel(model_size, device=device, compute_type=compute_type)
         except Exception as e:
